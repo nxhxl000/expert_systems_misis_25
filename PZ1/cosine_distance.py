@@ -8,8 +8,7 @@ from typing import List, Tuple
 
 def render_table(filename: str, delimiter: str = ';', tablefmt: str = 'fancy_grid') -> str:
     """
-    Читает CSV (рядом со скриптом) и возвращает строку с таблицей (рамки делает tabulate).
-    Ничего НЕ печатает.
+    Читает CSV  и возвращает строку с таблицей.
     """
     csv_path = Path(__file__).parent / filename
     with csv_path.open('r', encoding='utf-8-sig', newline='') as f:
@@ -159,7 +158,7 @@ def find_most_similar_pairs(labels: List[str], S: List[List[float]], ndigits: in
 # ---------- пример использования ----------
 
 if __name__ == "__main__":
-    FILENAME = "data.csv"  # ваш исходный CSV рядом со скриптом
+    FILENAME = "data.csv"  
 
     # 1) Исходные данные
     print_section("Исходные данные", render_table(FILENAME))

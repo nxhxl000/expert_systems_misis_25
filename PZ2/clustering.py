@@ -3,11 +3,11 @@ from pathlib import Path
 import csv
 from tabulate import tabulate
 
-# === где искать данные ===
+
 DATA_DIR = (Path(__file__).parent.parent / "PZ1").resolve()
 
 # файлы
-SOURCE_FILE   = "data.csv"                        # опционально: красиво показать исходные рейтинги
+SOURCE_FILE   = "data.csv"                        # исходные данные
 USERS_FILE    = "users_similarity_upper.csv"      # верхнетреугольная матрица пользователей
 PRODUCTS_FILE = "products_similarity_upper.csv"   # верхнетреугольная матрица продуктов
 DELIM = ';'
@@ -41,7 +41,7 @@ def ask_R_named(label: str):
             pass
         print("Некорректное значение. Пример: 0.90")
 
-# ----- чтение верхнетреугольной матрицы из CSV без восстановления полной -----
+# ----- чтение верхнетреугольной матрицы из CSV -----
 def read_upper_csv(path: Path):
     with path.open('r', encoding='utf-8-sig', newline='') as f:
         rows = list(csv.reader(f, delimiter=DELIM))
@@ -60,7 +60,7 @@ def read_upper_csv(path: Path):
                 set_upper(S, r, j, float(cell.replace(',', '.')))
     return labels, S
 
-# ----- печать текущей верхнетреугольной матрицы (без диагонали) -----
+# ----- печать текущей верхнетреугольной матрицы -----
 def print_upper(labels, S, title):
     n = len(labels)
     view = []
@@ -181,11 +181,11 @@ def run_clustering(labels, S, R, header_title):
 
         step += 1
 
-# =================== ГЛАВНЫЙ СЦЕНАРИЙ ===================
+
 if __name__ == "__main__":
     print("\n\033[1mАгломеративный алгоритм кластеризации\033[0m")
 
-    # (необязательно) красиво показать исходные рейтинги пользователей
+
     src = (DATA_DIR / SOURCE_FILE)
     if src.exists():
         with src.open('r', encoding='utf-8-sig', newline='') as f:
