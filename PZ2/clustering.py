@@ -1,4 +1,4 @@
-# clustering_users.py  (лежит в PZ2/)
+
 from pathlib import Path
 import csv
 from tabulate import tabulate
@@ -144,7 +144,7 @@ def run_clustering(labels, S, R, header_title):
         # максимум и сравнение с R
         pair, best = argmax_offdiag(S)
         best_show = round(best, NDIGITS) if pair else "—"
-        if (pair is None) or (best is None) or (best <= R) or (len(labels) <= 1):
+        if (pair is None) or (best is None) or (best < R) or (len(labels) <= 1):
             print(f"\nПорог достигнут или больше нет допустимых пар: максимум={best_show} ; R={round(R, NDIGITS)}. Остановка.")
             print(f"Текущие кластеры: {', '.join(labels)}")
             break
