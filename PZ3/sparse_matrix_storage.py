@@ -100,10 +100,6 @@ def build_csr(mat: List[List[float]], one_based_cols: bool = False) -> Tuple[lis
 # --------- ELPACK (ELLPACK/ITPACK) ---------
 
 def build_ellpack(mat: List[List[float]], one_based_cols: bool = False) -> Tuple[List[List], List[List]]:
-    """
-    Возвращает матрицы (n_rows × K): Value_ell, Column_ell,
-    где K = max(nnz в строке). Недостающие позиции заполняются нулями.
-    """
     n_rows = len(mat)
     nnz_per_row = [sum(1 for x in row if x != 0) for row in mat]
     K = max(nnz_per_row, default=0)
@@ -143,8 +139,7 @@ def _is_numberish(s: str) -> bool:
 def parse_preference_csv(filename: str, delimiter: Optional[str] = None):
     """
     Возвращает (headers, row_labels, data).
-    Заголовок — если в первой строке есть нечисловые значения.
-    Первый столбец — метки строк, если в нём есть нечисловые значения.
+    Подписи из CSV допускаются, но далее мы будем использовать собственные P*/U*.
     """
     csv_path = Path(__file__).parent / filename
     lines = csv_path.read_text(encoding="utf-8-sig").splitlines()
@@ -169,45 +164,106 @@ def parse_preference_csv(filename: str, delimiter: Optional[str] = None):
     data = [[_to_number(c) for c in r] for r in data_rows]
     return headers, row_labels, data
 
-def drop_all_zero_rows_and_cols_pref(data: List[List[float]],
-                                     headers: Optional[List[str]],
-                                     row_labels: Optional[List[str]]):
-    keep_rows = [i for i, row in enumerate(data) if any(v != 0 for v in row)]
-    data = [data[i] for i in keep_rows]
-    if row_labels is not None:
-        row_labels = [row_labels[i] for i in keep_rows]
-
-    if data:
-        n_cols = len(data[0])
-        keep_cols = [j for j in range(n_cols) if any(data[i][j] != 0 for i in range(len(data)))]
-        data = [[row[j] for j in keep_cols] for row in data]
-        if headers is not None:
-            headers = [headers[j] for j in keep_cols]
-    return data, headers, row_labels
-
 def row_mean_ignore_zeros(row: List[float]) -> float:
     nz = [x for x in row if x != 0]
     return sum(nz) / len(nz) if nz else float("nan")
 
-def filter_rows_by_mean(data: List[List[float]],
-                        row_labels: Optional[List[str]],
-                        R_thresh: float):
-    """
-    Оставляет ТОЛЬКО те строки, у которых средняя (без нулей) >= R_thresh.
-    Никаких жёстко заданных имён строк.
-    """
+# ---------- генерация имён преобразованной матрицы ----------
+
+def gen_row_names(n_rows: int) -> List[str]:
+    return [f"P{i+1}" for i in range(n_rows)]
+
+def gen_col_names(n_cols: int) -> List[str]:
+    return [f"U{j+1}" for j in range(n_cols)]
+
+# ---------- форматирование чисел в логах ----------
+
+def _fmt_num(x: float) -> str:
+    if x != x:  # NaN
+        return "NaN"
+    xi = int(round(x))
+    return str(xi) if abs(x - xi) < 1e-12 else f"{x:.3f}"
+
+# ---------- удаление нулевых строк и столбцов с логами ----------
+
+def drop_all_zero_rows_and_cols_pref_with_logs(
+    data: List[List[float]]
+) -> Tuple[List[List[float]], List[str], List[str], List[Tuple[str, str]], List[Tuple[str, str]]]:
+    if not data:
+        return [], [], [], [], []
+
+    n_rows0 = len(data)
+    n_cols0 = len(data[0]) if data else 0
+    row_names_all = gen_row_names(n_rows0)
+    col_names_all = gen_col_names(n_cols0)
+
+    # 1) строки = все нули
+    zero_rows = [i for i, row in enumerate(data) if all(v == 0 for v in row)]
+    removed_rows_log = [(row_names_all[i], "все оценки = 0 (удалено на шаге очистки нулевых строк)")
+                        for i in zero_rows]
+    keep_rows = [i for i in range(len(data)) if i not in zero_rows]
+    data = [data[i] for i in keep_rows]
+    row_names = [row_names_all[i] for i in keep_rows]
+
+    # 2) столбцы = все нули (после удаления нулевых строк)
+    if data:
+        n_cols = len(data[0])
+        zero_cols = []
+        keep_cols = []
+        for j in range(n_cols):
+            col_nonzero = any(data[i][j] != 0 for i in range(len(data)))
+            if col_nonzero:
+                keep_cols.append(j)
+            else:
+                zero_cols.append(j)
+
+        removed_cols_log = [(col_names_all[j], "все оценки = 0 (удалено на шаге очистки нулевых столбцов)")
+                            for j in zero_cols]
+
+        data = [[row[j] for j in keep_cols] for row in data]
+        col_names = [col_names_all[j] for j in keep_cols]
+    else:
+        removed_cols_log = [(name, "все оценки = 0 (удалено на шаге очистки нулевых столбцов)") for name in col_names_all]
+        col_names = []
+
+    return data, row_names, col_names, removed_rows_log, removed_cols_log
+
+# ---------- фильтр строк по среднему с логами ----------
+
+def filter_rows_by_mean_with_logs(
+    data: List[List[float]],
+    row_names: List[str],
+    R_thresh: float
+) -> Tuple[List[List[float]], List[str], List[Tuple[str, str]]]:
+    removed_rows_log: List[Tuple[str, str]] = []
     keep = []
+
     for i, row in enumerate(data):
         m = row_mean_ignore_zeros(row)
-        if m == m and m >= R_thresh:   # m==m => не NaN
+        if m == m and m >= R_thresh:
             keep.append(i)
+        else:
+            if m != m:
+                reason = "среднее = NaN (нет ненулевых оценок)"
+            else:
+                reason = f"среднее = {_fmt_num(m)} < R={_fmt_num(R_thresh)}"
+            removed_rows_log.append((row_names[i], f"{reason} (удалено на шаге фильтра по R)"))
+
     data = [data[i] for i in keep]
-    if row_labels is not None:
-        row_labels = [row_labels[i] for i in keep]
-    return data, row_labels
+    row_names = [row_names[i] for i in keep]
+    return data, row_names, removed_rows_log
+
+# ---------- рендер преобразованной матрицы ----------
+
+def to_display_with_PU_headers(row_names: List[str], col_names: List[str], data: List[List[float]]) -> str:
+    # округлим «почти целые» для красоты
+    body = [[(int(v) if abs(v-round(v)) < 1e-12 else v) for v in row] for row in data]
+    # подставим имена строк
+    body = [[row_names[i]] + body[i] for i in range(len(body))]
+    headers = [""] + col_names
+    return tabulate(body, headers=headers, tablefmt='fancy_grid', stralign='center', numalign='center')
 
 def render_pref_table(filename: str) -> str:
-    """Исходная матрица предпочтений: нули НЕ скрываем."""
     csv_path = Path(__file__).parent / filename
     text = csv_path.read_text(encoding="utf-8-sig").splitlines()
     if not text:
@@ -215,17 +271,6 @@ def render_pref_table(filename: str) -> str:
     delimiter = _guess_delimiter(text[:10])
     rows = list(csv.reader(text, delimiter=delimiter))
     return tabulate(rows, tablefmt='fancy_grid', stralign='center', numalign='center')
-
-def to_display_with_headers(headers: Optional[List[str]],
-                            row_labels: Optional[List[str]],
-                            data: List[List[float]]) -> str:
-    body = [[(int(v) if abs(v-round(v)) < 1e-12 else v) for v in row] for row in data]
-    if row_labels is not None:
-        body = [[row_labels[i]] + body[i] for i in range(len(body))]
-    if headers is not None:
-        hdr = ([""] if row_labels is not None else []) + headers
-        return tabulate(body, headers=hdr, tablefmt='fancy_grid', stralign='center', numalign='center')
-    return tabulate(body, tablefmt='fancy_grid', stralign='center', numalign='center')
 
 # --------- main ---------
 
@@ -260,15 +305,46 @@ if __name__ == "__main__":
     # Исходная матрица предпочтений
     print_section("Исходная матрица предпочтений", render_pref_table(PREF_FILE))
 
-    # Парсинг и подготовка
-    headers, row_labels, data = parse_preference_csv(PREF_FILE)
+    # Порог R, с которым сравниваем средние по продукту
+    print_section("Порог для среднего R", f"R = {R_THRESH}")
 
-    # убрать полностью нулевые строки и столбцы — до расчёта средних
-    data, headers, row_labels = drop_all_zero_rows_and_cols_pref(data, headers, row_labels)
+    # Парсинг
+    _, _, data = parse_preference_csv(PREF_FILE)
 
-    # оставить только строки, где средняя без нулей >= R
-    data, row_labels = filter_rows_by_mean(data, row_labels, R_THRESH)
+    # Шаг 1: удаление полностью нулевые строки и столбцы с логами
+    data, row_names, col_names, removed_rows_log_1, removed_cols_log = drop_all_zero_rows_and_cols_pref_with_logs(data)
 
-    # Вывод преобразованной матрицы
+    # Шаг 2: фильтрация строк по среднему >= R с логами
+    data, row_names, removed_rows_log_2 = filter_rows_by_mean_with_logs(data, row_names, R_THRESH)
+
+    # Объединённые логи по строкам
+    removed_rows_log = removed_rows_log_1 + removed_rows_log_2
+
+    # Вывод удаленных строк
+    if removed_rows_log:
+        rows_report = tabulate(
+            [[name, reason] for name, reason in removed_rows_log],
+            headers=["Строка (P)", "Причина удаления"],
+            tablefmt='fancy_grid',
+            stralign='left'
+        )
+    else:
+        rows_report = "— (ничего не удалено)"
+
+    print_section("Удалённые строки и причины", rows_report)
+
+    # Вывод удаленных столбцов
+    if removed_cols_log:
+        cols_report = tabulate(
+            [[name, reason] for name, reason in removed_cols_log],
+            headers=["Столбец (U)", "Причина удаления"],
+            tablefmt='fancy_grid',
+            stralign='left'
+        )
+    else:
+        cols_report = "— (ничего не удалено)"
+    print_section("Удалённые столбцы и причины", cols_report)
+
+    # Вывод преобразованной матрицы 
     print_section("Преобразованная матрица предпочтений",
-                  to_display_with_headers(headers, row_labels, data))
+                  to_display_with_PU_headers(row_names, col_names, data))
