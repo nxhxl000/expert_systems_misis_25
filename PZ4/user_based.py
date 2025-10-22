@@ -188,7 +188,7 @@ if __name__ == "__main__":
             print("\n" + "-"*80)
             print(f"Пара для прогноза: Пользователь = {user_selected}, Товар = {product_selected}")
 
-            # Соседи: не-новые пользователи, у кого сходство >= порога И есть оценка по товару pi
+            
             u_pos = idx_in_S[u]
             neighbor_globals = [
                 v for v in non_new_users
@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
             kept_col_indices = [u] + neighbor_globals
 
-            # «Следующая матрица»: исходная матрица предпочтений только с отобранными пользователями
+            # Матрица с схожими пользователями
             filtered_headers = [ulabel(j) for j in kept_col_indices]
             filtered_rows = []
             if row_labels is not None:
